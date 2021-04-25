@@ -1,5 +1,4 @@
-#include "LibraryInterface.h"
-
+#include <Dictionaries/LibraryDictionarySourceExternal.h>
 #include <common/logger_useful.h>
 
 namespace
