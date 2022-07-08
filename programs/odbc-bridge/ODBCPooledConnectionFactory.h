@@ -1,9 +1,10 @@
 #pragma once
 
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <nanodbc/nanodbc.h>
 #include <mutex>
 #include <base/BorrowedObjectPool.h>
+#include <base/defines.h>
 #include <unordered_map>
 
 
@@ -37,11 +38,20 @@ public:
     {
     }
 
+    explicit ConnectionHolder(const String & connection_string_)
+        : pool(nullptr)
+        , connection()
+        , connection_string(connection_string_)
+    {
+        updateConnection();
+    }
+
     ConnectionHolder(const ConnectionHolder & other) = delete;
 
     ~ConnectionHolder()
     {
-        pool->returnObject(std::move(connection));
+        if (pool != nullptr)
+            pool->returnObject(std::move(connection));
     }
 
     nanodbc::connection & get() const
@@ -81,7 +91,11 @@ T execute(nanodbc::ConnectionHolderPtr connection_holder, std::function<T(nanodb
     }
     catch (const nanodbc::database_error & e)
     {
-        tryLogCurrentException(__PRETTY_FUNCTION__);
+        LOG_ERROR(
+            &Poco::Logger::get("ODBCConnection"),
+            "ODBC query failed with error: {}, state: {}, native code: {}",
+            e.what(), e.state(), e.native());
+
         /// SQLState, connection related errors start with 08 (main: 08S01), cursor invalid state is 24000.
         /// Invalid cursor state is a retriable error.
         /// Invalid transaction state 25000. Truncate to 2 letters on purpose.
@@ -115,12 +129,12 @@ T execute(nanodbc::ConnectionHolderPtr connection_holder, std::function<T(nanodb
 }
 
 
-class ODBCConnectionFactory final : private boost::noncopyable
+class ODBCPooledConnectionFactory final : private boost::noncopyable
 {
 public:
-    static ODBCConnectionFactory & instance()
+    static ODBCPooledConnectionFactory & instance()
     {
-        static ODBCConnectionFactory ret;
+        static ODBCPooledConnectionFactory ret;
         return ret;
     }
 
@@ -156,7 +170,7 @@ public:
 private:
     /// [connection_settings_string] -> [connection_pool]
     using PoolFactory = std::unordered_map<std::string, nanodbc::PoolPtr>;
-    PoolFactory factory;
+    PoolFactory factory TSA_GUARDED_BY(mutex);
     std::mutex mutex;
 };
 
