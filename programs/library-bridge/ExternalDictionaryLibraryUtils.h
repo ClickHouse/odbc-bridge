@@ -2,10 +2,9 @@
 
 #include <Common/StringUtils/StringUtils.h>
 #include <Core/Block.h>
-#include <base/bit_cast.h>
 #include <base/range.h>
 
-#include "LibraryInterface.h"
+#include "ExternalDictionaryLibraryAPI.h"
 
 
 namespace DB
@@ -22,7 +21,7 @@ public:
         strings_holder = strings_pass;
         strings.size = strings_holder.size();
 
-        ptr_holder = std::make_unique<ClickHouseLibrary::CString[]>(strings.size);
+        ptr_holder = std::make_unique<ExternalDictionaryLibraryAPI::CString[]>(strings.size);
         strings.data = ptr_holder.get();
 
         size_t i = 0;
@@ -33,10 +32,10 @@ public:
         }
     }
 
-    ClickHouseLibrary::CStrings strings; // will pass pointer to lib
+    ExternalDictionaryLibraryAPI::CStrings strings; // will pass pointer to lib
 
 private:
-    std::unique_ptr<ClickHouseLibrary::CString[]> ptr_holder = nullptr;
+    std::unique_ptr<ExternalDictionaryLibraryAPI::CString[]> ptr_holder = nullptr;
     Container strings_holder;
 };
 

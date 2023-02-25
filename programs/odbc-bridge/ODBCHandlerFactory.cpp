@@ -1,13 +1,21 @@
-#include "HandlerFactory.h"
+#include "ODBCHandlerFactory.h"
 #include "PingHandler.h"
 #include "ColumnInfoHandler.h"
-#include <Common/config.h>
+#include "config.h"
 #include <Poco/URI.h>
 #include <Poco/Net/HTTPServerRequest.h>
 #include <Common/logger_useful.h>
 
 namespace DB
 {
+
+ODBCBridgeHandlerFactory::ODBCBridgeHandlerFactory(const std::string & name_, size_t keep_alive_timeout_, ContextPtr context_)
+    : WithContext(context_)
+    , log(&Poco::Logger::get(name_))
+    , name(name_)
+    , keep_alive_timeout(keep_alive_timeout_)
+{
+}
 
 std::unique_ptr<HTTPRequestHandler> ODBCBridgeHandlerFactory::createRequestHandler(const HTTPServerRequest & request)
 {
