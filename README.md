@@ -1,12 +1,12 @@
 # ClickHouse ODBC Bridge
 
-This repository contains a plugin for ClickHouse to let it run federated queries on other databases using their ODBC interface.
+This repository contains a plugin for ClickHouse that lets it run federated queries on other databases using their ODBC interface. This plugin was introduced in ClickHouse version 18.12 in Aug 2018.
 
 Don't be confused with another repository, [clickhouse-odbc](https://github.com/ClickHouse/clickhouse-odbc/), which provides an official ODBC driver for ClickHouse.
 
 # About
 
-[ClickHouse](https://github.com/ClickHouse/ClickHouse) database integrates with a variety of external data sources, including external DBMS, for federated queries. Some of these databases, such as MySQL, PostgreSQL, MongoDB, and Redis, are supported through the native integration, and it can also utilize ODBC and JDBC drivers to integrate with any other compatible database.
+[ClickHouse](https://github.com/ClickHouse/ClickHouse) database integrates with a variety of external data sources, including external DBMS, for federated queries. Some of these databases, such as MySQL, PostgreSQL, MongoDB, and Redis, are supported through native integration, and they can also utilize ODBC and JDBC drivers to integrate with any other compatible database.
 
 [ODBC](https://en.wikipedia.org/wiki/Open_Database_Connectivity) provides a standard interface for such plugins as C libraries. It became popular for using ClickHouse to query data from Oracle and MS SQL Server.  
 
@@ -16,18 +16,18 @@ ODBC works using dynamically loaded third-party shared libraries (.dll, .so). It
 
 If an application loads drivers directly, this will provide a bunch of security and stability problems:
 - third-party libraries cannot be tested with sanitizers;
-- third-party libraries may expose unneeded symbols which conflict with the main program symbols;
+- third-party libraries may expose unneeded symbols that conflict with the main program symbols;
 - third-party libraries may break ABI subtly;
 - the main program has to be linked dynamically, which is also insecure;
 - the driver manager may be asked to load arbitrary shared libraries from the filesystem, which is insecure;
 - loading shared libraries in runtime is a complicated process with many options and a lot of fragility;
 - third-party code in the program's address space implies memory-safety issues;
 - the set of possible drivers is unknown in advance, and if a problem arises from the usage of a particular driver, it makes debugging hardly possible;
-- drivers cannot be trusted, and besides vulnerabilities, they can do excessive resource consumption, exhaust memory, do busy loops, create threads, print logs uncontrollably, etc.
+- drivers cannot be trusted, and besides vulnerabilities, they can do excessive resource consumption, exhaust memory, make busy loops, create threads, print logs uncontrollably, etc.
 
 It's obvious that no reasonable product should load dynamic libraries at runtime. At the same time, we want to use ODBC drivers. To resolve this paradox, we split the mechanics of integration with ODBC into a separate program, `clickhouse-odbc-bridge`.
 
-`clickhouse-odbc-bridge` is a small isolated program, that uses ODBC drivers and provides an HTTP interface to interact with it. The queries have to be passed using an HTTP POST or GET request, and the results are serialized using one of supported formats, such as TSV. This means that possible bugs inside third-party ODBC drivers don't affect our precious, solid, self-contained, and self-confident `clickhouse-server`.
+`clickhouse-odbc-bridge` is a small isolated program, that uses ODBC drivers and provides an HTTP interface to interact with it. The queries have to be passed using an HTTP POST or GET request, and the results are serialized using one of the supported formats, such as TSV. This means that possible bugs inside third-party ODBC drivers don't affect our precious, solid, self-contained, and self-confident `clickhouse-server`.
 
 But it still requires extra care to avoid potential vulnerabilities related to ODBC:
 - we prevent using ODBC connection strings to specify paths to drivers at run time;
