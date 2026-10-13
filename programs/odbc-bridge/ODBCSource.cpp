@@ -6,7 +6,11 @@
 #include <Columns/ColumnNullable.h>
 #include <Columns/IColumn.h>
 #include <Common/assert_cast.h>
+#include <Core/DecimalFunctions.h>
 #include <IO/ReadHelpers.h>
+
+#include <sql.h>
+#include <sqlext.h>
 
 
 namespace DB
@@ -146,12 +150,38 @@ void ODBCSource::insertValue(
         }
         case ValueType::vtDateTime64:
         {
-            auto value = row.get<std::string>(idx);
-            ReadBufferFromString in(value);
-            DateTime64 time = 0;
             const DataTypeDateTime64 & datetime_type = assert_cast<const DataTypeDateTime64 &>(*data_type);
-            readDateTime64Text(time, datetime_type.getScale(), in, datetime_type.getTimeZone());
-            column.insert(time);
+            const UInt32 scale = datetime_type.getScale();
+            const int source_sql_type = row.column_datatype(static_cast<short>(idx));
+
+            if (source_sql_type == SQL_TYPE_TIMESTAMP || source_sql_type == SQL_TIMESTAMP)
+            {
+                /// Read the raw ODBC timestamp struct instead of a string. nanodbc's string
+                /// conversion formats the value with strftime, whose format has no fractional-seconds
+                /// specifier, so the sub-second part is silently dropped. The struct keeps `fract`.
+                const nanodbc::timestamp stamp = row.get<nanodbc::timestamp>(idx);
+
+                Int64 whole = datetime_type.getTimeZone().makeDateTime(
+                    stamp.year, stamp.month, stamp.day, stamp.hour, stamp.min, stamp.sec);
+                whole = std::max<Int64>(whole, 0);
+
+                /// fract is nanoseconds; rescale to the column precision (scale <= 9, capped in schema).
+                Int64 fractional = stamp.fract;
+                for (UInt32 i = scale; i < 9; ++i)
+                    fractional /= 10;
+
+                column.insert(DecimalUtils::decimalFromComponents<DateTime64>(whole, fractional, scale));
+            }
+            else
+            {
+                /// Non-timestamp source (e.g. a string/varchar column declared as DateTime64 in the
+                /// destination table): keep the original textual parsing path.
+                auto value = row.get<std::string>(idx);
+                ReadBufferFromString in(value);
+                DateTime64 time = 0;
+                readDateTime64Text(time, scale, in, datetime_type.getTimeZone());
+                column.insert(time);
+            }
             break;
         }
         case ValueType::vtDecimal32:

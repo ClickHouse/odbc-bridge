@@ -41,7 +41,19 @@ namespace ErrorCodes
 
 namespace
 {
-    DataTypePtr getDataType(SQLSMALLINT type)
+    /// Map a timestamp column to DateTime or DateTime64 depending on the fractional-seconds
+    /// precision the driver reports (e.g. 3 for SQL Server `datetime`, 6 for PostgreSQL
+    /// `timestamp`). Positive precision needs DateTime64 to keep sub-second values; 0 stays plain
+    /// DateTime. DateTime64 scale tops out at 9.
+    DataTypePtr getTimestampDataType(SQLSMALLINT decimal_digits)
+    {
+        const auto & factory = DataTypeFactory::instance();
+        if (decimal_digits > 0)
+            return factory.get("DateTime64(" + std::to_string(std::min<int>(decimal_digits, 9)) + ")");
+        return factory.get("DateTime");
+    }
+
+    DataTypePtr getDataType(SQLSMALLINT type, SQLSMALLINT decimal_digits, SQLSMALLINT datetime_subtype)
     {
         const auto & factory = DataTypeFactory::instance();
 
@@ -62,9 +74,16 @@ namespace
             case SQL_DOUBLE:
                 return factory.get("Float64");
             case SQL_DATETIME:
+                /// `SQLColumns` reports the verbose type SQL_DATETIME for date/time/timestamp
+                /// columns; the concrete type is in SQL_DATETIME_SUB. Only a timestamp is mapped to
+                /// DateTime64 (the reported bug). DATE/TIME subtypes keep the exact pre-fix mapping
+                /// (DateTime) so existing schemas are unchanged.
+                if (datetime_subtype == SQL_CODE_TIMESTAMP)
+                    return getTimestampDataType(decimal_digits);
                 return factory.get("DateTime");
             case SQL_TYPE_TIMESTAMP:
-                return factory.get("DateTime");
+                /// Some drivers report the concrete type here instead of the verbose SQL_DATETIME.
+                return getTimestampDataType(decimal_digits);
             case SQL_TYPE_DATE:
                 return factory.get("Date");
             default:
@@ -184,7 +203,8 @@ void ODBCColumnsInfoHandler::handleRequest(HTTPServerRequest & request, HTTPServ
 
             bool is_nullable = columns_definition.nullable() == SQL_NULLABLE;
 
-            auto column_type = getDataType(type);
+            auto column_type = getDataType(
+                type, columns_definition.decimal_digits(), columns_definition.sql_datetime_subtype());
 
             if (external_table_functions_use_nulls && is_nullable == SQL_NULLABLE)
                 column_type = std::make_shared<DataTypeNullable>(column_type);
