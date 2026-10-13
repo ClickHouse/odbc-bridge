@@ -13,6 +13,8 @@ namespace DB
 {
 namespace ErrorCodes
 {
+    extern const int NUMBER_OF_COLUMNS_DOESNT_MATCH;
+    extern const int TOO_MANY_COLUMNS;
     extern const int UNKNOWN_TYPE;
 }
 
@@ -45,6 +47,15 @@ Chunk ODBCSource::generate()
             is_finished = true;
             break;
         }
+
+        const size_t num_result_columns = static_cast<size_t>(result.columns());
+        if (num_result_columns != columns.size())
+            throw Exception(
+                num_result_columns > columns.size() ? ErrorCodes::TOO_MANY_COLUMNS : ErrorCodes::NUMBER_OF_COLUMNS_DOESNT_MATCH,
+                "Row has {} columns instead of {}, expected structure: {}",
+                num_result_columns,
+                columns.size(),
+                description.sample_block.dumpStructure());
 
         for (int idx = 0; idx < result.columns(); ++idx)
         {
