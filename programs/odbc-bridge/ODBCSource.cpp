@@ -137,6 +137,9 @@ void ODBCSource::insertValue(
         case ValueType::vtDate:
             column.insert(UInt16{LocalDate{row.get<std::string>(idx)}.getDayNum()});
             break;
+        case ValueType::vtDate32:
+            column.insert(Int32{LocalDate{row.get<std::string>(idx)}.getExtenedDayNum()});
+            break;
         case ValueType::vtDateTime:
         {
             auto value = row.get<std::string>(idx);
@@ -161,16 +164,18 @@ void ODBCSource::insertValue(
                 /// specifier, so the sub-second part is silently dropped. The struct keeps `fract`.
                 const nanodbc::timestamp stamp = row.get<nanodbc::timestamp>(idx);
 
-                Int64 whole = datetime_type.getTimeZone().makeDateTime(
+                const Int64 whole = datetime_type.getTimeZone().makeDateTime(
                     stamp.year, stamp.month, stamp.day, stamp.hour, stamp.min, stamp.sec);
-                whole = std::max<Int64>(whole, 0);
 
                 /// fract is nanoseconds; rescale to the column precision (scale <= 9, capped in schema).
                 Int64 fractional = stamp.fract;
                 for (UInt32 i = scale; i < 9; ++i)
                     fractional /= 10;
 
-                column.insert(DecimalUtils::decimalFromComponents<DateTime64>(whole, fractional, scale));
+                /// `fractional` counts up from `whole`, also before 1970, while decimalFromComponents
+                /// would subtract it from a negative `whole`.
+                column.insert(DateTime64(DecimalUtils::multiplyAdd<Int64>(
+                    whole, DecimalUtils::scaleMultiplier<Int64>(scale), fractional)));
             }
             else
             {
