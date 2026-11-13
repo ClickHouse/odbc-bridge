@@ -3,6 +3,7 @@
 #include <IO/ReadBufferFromString.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeDateTime64.h>
+#include <DataTypes/DataTypeEnum.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/IColumn.h>
 #include <Common/assert_cast.h>
@@ -31,6 +32,18 @@ ODBCSource::ODBCSource(
     , query(query_str)
 {
     description.init(sample_block);
+
+    /// insertValue cannot read these, so fail before the query is sent.
+    for (size_t i = 0; i < description.types.size(); ++i)
+    {
+        const ValueType type = description.types[i].first;
+        if (type == ValueType::vtArray || type == ValueType::vtPoint)
+            throw Exception(
+                ErrorCodes::UNKNOWN_TYPE,
+                "Unsupported type {}",
+                removeNullable(description.sample_block.getByPosition(i).type)->getName());
+    }
+
     result = execute<nanodbc::result>(connection_holder,
                      [&](nanodbc::connection & connection) { return execute(connection, query); });
 }
@@ -123,10 +136,14 @@ void ODBCSource::insertValue(
             column.insert(row.get<double>(idx));
             break;
         case ValueType::vtFixedString:
-        case ValueType::vtEnum8:
-        case ValueType::vtEnum16:
         case ValueType::vtString:
             column.insert(row.get<std::string>(idx));
+            break;
+        case ValueType::vtEnum8:
+            column.insert(assert_cast<const DataTypeEnum8 &>(*data_type).castToValue(row.get<std::string>(idx)));
+            break;
+        case ValueType::vtEnum16:
+            column.insert(assert_cast<const DataTypeEnum16 &>(*data_type).castToValue(row.get<std::string>(idx)));
             break;
         case ValueType::vtUUID:
         {
@@ -136,6 +153,9 @@ void ODBCSource::insertValue(
         }
         case ValueType::vtDate:
             column.insert(UInt16{LocalDate{row.get<std::string>(idx)}.getDayNum()});
+            break;
+        case ValueType::vtDate32:
+            column.insert(Int32{LocalDate{row.get<std::string>(idx)}.getExtenedDayNum()});
             break;
         case ValueType::vtDateTime:
         {
@@ -161,16 +181,18 @@ void ODBCSource::insertValue(
                 /// specifier, so the sub-second part is silently dropped. The struct keeps `fract`.
                 const nanodbc::timestamp stamp = row.get<nanodbc::timestamp>(idx);
 
-                Int64 whole = datetime_type.getTimeZone().makeDateTime(
+                const Int64 whole = datetime_type.getTimeZone().makeDateTime(
                     stamp.year, stamp.month, stamp.day, stamp.hour, stamp.min, stamp.sec);
-                whole = std::max<Int64>(whole, 0);
 
                 /// fract is nanoseconds; rescale to the column precision (scale <= 9, capped in schema).
                 Int64 fractional = stamp.fract;
                 for (UInt32 i = scale; i < 9; ++i)
                     fractional /= 10;
 
-                column.insert(DecimalUtils::decimalFromComponents<DateTime64>(whole, fractional, scale));
+                /// `fractional` counts up from `whole`, also before 1970, while decimalFromComponents
+                /// would subtract it from a negative `whole`.
+                column.insert(DateTime64(DecimalUtils::multiplyAdd<Int64>(
+                    whole, DecimalUtils::scaleMultiplier<Int64>(scale), fractional)));
             }
             else
             {
