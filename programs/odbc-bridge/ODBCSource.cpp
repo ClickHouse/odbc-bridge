@@ -3,6 +3,7 @@
 #include <IO/ReadBufferFromString.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeDateTime64.h>
+#include <DataTypes/DataTypeEnum.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/IColumn.h>
 #include <Common/assert_cast.h>
@@ -31,6 +32,18 @@ ODBCSource::ODBCSource(
     , query(query_str)
 {
     description.init(sample_block);
+
+    /// insertValue cannot read these, so fail before the query is sent.
+    for (size_t i = 0; i < description.types.size(); ++i)
+    {
+        const ValueType type = description.types[i].first;
+        if (type == ValueType::vtArray || type == ValueType::vtPoint)
+            throw Exception(
+                ErrorCodes::UNKNOWN_TYPE,
+                "Unsupported type {}",
+                removeNullable(description.sample_block.getByPosition(i).type)->getName());
+    }
+
     result = execute<nanodbc::result>(connection_holder,
                      [&](nanodbc::connection & connection) { return execute(connection, query); });
 }
@@ -123,10 +136,14 @@ void ODBCSource::insertValue(
             column.insert(row.get<double>(idx));
             break;
         case ValueType::vtFixedString:
-        case ValueType::vtEnum8:
-        case ValueType::vtEnum16:
         case ValueType::vtString:
             column.insert(row.get<std::string>(idx));
+            break;
+        case ValueType::vtEnum8:
+            column.insert(assert_cast<const DataTypeEnum8 &>(*data_type).castToValue(row.get<std::string>(idx)));
+            break;
+        case ValueType::vtEnum16:
+            column.insert(assert_cast<const DataTypeEnum16 &>(*data_type).castToValue(row.get<std::string>(idx)));
             break;
         case ValueType::vtUUID:
         {
